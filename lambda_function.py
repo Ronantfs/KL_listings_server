@@ -3,8 +3,8 @@ import os
 import re
 from datetime import date, timedelta
 from dotenv import load_dotenv
-from modules.aws import set_s3_client, _generate_presigned_url
-from modules.http import build_response
+from aws import set_s3_client, _generate_presigned_url
+from http_utils import build_response
 
 
 # Load environment variables from .env (for local dev)
@@ -55,9 +55,21 @@ def get_cinemas_active_listings_path(cinema: str) -> str:
     return cinemas_active_listings_json
 
 
+def _as_list(value):
+    """
+    Normalize query param into a list.
+    - If already a list, return as-is.
+    - If a non-empty string, split by comma.
+    - Else return [].
+    """
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    return []
+
+
 # ===== HANDLER UTILS =====
-
-
 def _get_cinemas_raw_listings(cinemas: list[str]) -> dict:
     """
     Fetch all active listings JSONs from S3 for the given cinemas.
@@ -89,19 +101,7 @@ def _get_cinemas_good_images(cinemas: list[str], expires_in: int = 300) -> dict:
     """
     Fetch all 'good' images for each cinema from S3, returning both
     filenames (for matching) and presigned URLs (for frontend use).
-
     Handles pagination for >1000 objects per cinema.
-
-    Returns:
-        dict: {
-            cinema_name: [
-                {
-                    "name": "<filename>",  # used for filtering
-                    "url": "<presigned_s3_url>"  # to attach later to listing
-                },
-                ...
-            ]
-        }
     """
     cinemas_good_images = {}
 
@@ -115,7 +115,7 @@ def _get_cinemas_good_images(cinemas: list[str], expires_in: int = 300) -> dict:
                 params = {
                     "Bucket": IMAGE_BUCKET,
                     "Prefix": images_folder,
-                    "MaxKeys": 1000,  # pagination limit
+                    "MaxKeys": 1000,
                 }
                 if continuation_token:
                     params["ContinuationToken"] = continuation_token
@@ -137,7 +137,6 @@ def _get_cinemas_good_images(cinemas: list[str], expires_in: int = 300) -> dict:
                             }
                         )
 
-                # Continue if there are more keys
                 if response.get("IsTruncated"):
                     continuation_token = response.get("NextContinuationToken")
                 else:
@@ -169,15 +168,7 @@ def _filter_cinema_listings_by_images(
     """
     Filter a single cinema's listings to include only those
     whose normalized title exactly matches a 'good' image filename (without extension).
-
-    Args:
-        cinema_listings (dict): { listing_name: {...} }
-        good_images (list[str]): list of image filenames (with extensions)
-
-    Returns:
-        dict: filtered { listing_name: {...} } with exact matches only
     """
-    # Build a set of normalized image basenames (without extensions)
     norm_image_basenames = {
         _normalize_name(os.path.splitext(img)[0])
         for img in good_images
@@ -198,14 +189,6 @@ def _match_and_attach_images_to_listings(
 ) -> dict:
     """
     Filter and enrich listings for each cinema by attaching matching presigned image URLs.
-
-    Args:
-        listings_by_cinema (dict): raw listings from _get_cinemas_raw_listings()
-        images_by_cinema (dict): image data from _get_cinemas_good_images()
-        cinemas (list[str]): list of cinema names
-
-    Returns:
-        dict: { cinema_name: { "listings": { <title>: <listing_with_image_url> } } }
     """
     listings_with_good_images = {}
 
@@ -213,7 +196,6 @@ def _match_and_attach_images_to_listings(
         raw_cinema_listings = listings_by_cinema.get(cinema, {})
         images_info = images_by_cinema.get(cinema, [])
 
-        # Create lookup: normalized image basename → presigned URL
         image_map = {
             os.path.splitext(img["name"])[0].lower(): img["url"]
             for img in images_info
@@ -224,7 +206,6 @@ def _match_and_attach_images_to_listings(
         for title, listing_data in raw_cinema_listings.items():
             norm_title = _normalize_name(title)
             if norm_title in image_map:
-                # Add presigned URL to listing
                 listing_data["image_url"] = image_map[norm_title]
                 filtered_listings[title] = listing_data
 
@@ -235,75 +216,46 @@ def _match_and_attach_images_to_listings(
 
 def _redact_listings_fields(listings_with_good_images: dict) -> dict:
     """
-    Remove unwanted fields (e.g., 'image_to_download') from listings,
-    and drop cinemas that have no listings remaining.
-
-    Args:
-        listings_with_good_images (dict):
-            { cinema_name: { <title>: {listing_data} } }
-
-    Returns:
-        dict: cleaned structure with empty cinemas removed
-               (format: { cinema_name: {"listings": {...}} })
+    Remove unwanted fields and drop cinemas that have no listings remaining.
     """
     FIELDS_TO_REMOVE = {
         "image_to_download",
         "isImageGood",
         "s3ImageURL",
-    }  # extendable set
+    }
 
     redacted = {}
 
     for cinema, listings in listings_with_good_images.items():
         cleaned_listings = {}
         for title, data in listings.items():
-            # skip if listing data isn't a dict
             if not isinstance(data, dict):
                 continue
-
-            # remove unwanted fields
             cleaned = {k: v for k, v in data.items() if k not in FIELDS_TO_REMOVE}
-
-            # only keep listings that have content left
             if cleaned:
                 cleaned_listings[title] = cleaned
-
-        # only include cinema if it has any listings left
         if cleaned_listings:
-            redacted[cinema] = {"listings": cleaned_listings}
+            redacted[cinema] = cleaned_listings
 
     return redacted
 
 
-########## get listing handlers:
 def _filter_listings_by_dates(cinema_listings: dict, dates: list[str]) -> dict:
     """
     Filter listings for a given cinema to only include those
     where at least one 'when' entry matches a date in `dates`.
-
-    Args:
-        cinema_listings (dict): { listing_name: {..., 'when': [ {...}, ... ] } }
-        dates (list[str]): list of date strings (format: YYYY-MM-DD)
-
-    Returns:
-        dict: filtered { listing_name: {...} } containing only listings
-              with 'when' dates in the specified `dates`.
     """
     if not dates:
-        return cinema_listings  # nothing to filter
+        return cinema_listings
 
     filtered = {}
-
     for title, listing_data in cinema_listings.items():
         when_entries = listing_data.get("when", [])
         if not isinstance(when_entries, list):
-            continue  # malformed, skip
+            continue
 
-        # keep only 'when' entries with a date in the target list
         filtered_when = [w for w in when_entries if w.get("date") in dates]
-
         if filtered_when:
-            # copy listing but replace its 'when' list with only relevant dates
             filtered_listing = listing_data.copy()
             filtered_listing["when"] = filtered_when
             filtered[title] = filtered_listing
@@ -316,77 +268,35 @@ def _filter_cinemas_listings_by_dates(
 ) -> dict:
     """
     Apply _filter_listings_by_dates across all cinemas,
-    remove cinemas that end up empty, and redact unwanted fields.
-
-    Args:
-        listings_by_cinema (dict): { cinema_name: { <title>: <listing_data> } }
-        dates (list[str]): list of date strings
-
-    Returns:
-        dict: cleaned and filtered structure {
-            cinema_name: { <title>: <listing_data_without_removed_fields> }
-        }
+    remove cinemas that end up empty.
     """
     filtered_all = {}
-
     for cinema, listings in listings_by_cinema.items():
         if not isinstance(listings, dict):
             continue
-
         filtered_listings = _filter_listings_by_dates(listings, dates)
         if filtered_listings:
-            # Keep the same structure, no extra "listings" key
             filtered_all[cinema] = filtered_listings
-
-    # # Redact fields like 'image_to_download' after filtering
-    # redacted_filtered_all = _redact_listings(filtered_all)
-
     return filtered_all
 
 
 # ===== ROUTE HANDLERS =====
 def get_listings(cinemas: list[str], dates: list[str]) -> dict:
-    """
-    Fetch listings for the given cinemas and filter them
-    to include only entries whose 'when' dates match the given dates.
-
-    Args:
-        cinemas (list[str]): cinemas to include
-        dates (list[str]): list of target dates (YYYY-MM-DD)
-
-    Returns:
-        dict: { cinema_name: { "listings": { <title>: <filtered_listing> } } }
-    """
-    # Step 1: Get raw listings JSON for all cinemas
     listings_by_cinema = _get_cinemas_raw_listings(cinemas)
-
-    # Step 2: Filter listings by matching 'when.date'
     filtered_by_dates = _filter_cinemas_listings_by_dates(listings_by_cinema, dates)
-
-    # Step 3: Redact fields like 'image_to_download' for cleanliness
     redacted_filtered = _redact_listings_fields(filtered_by_dates)
-
     return redacted_filtered
 
 
 def get_image_listings(cinemas: list[str], dates: list[str]) -> dict:
-    """
-    Combine active listings and 'good' images for each cinema,
-    keeping only listings that have exactly matching images.
-    Applies date filtering before redaction.
-    Adds the matching presigned URL to each listing.
-    """
     listings_by_cinema = _get_cinemas_raw_listings(cinemas)
     listings_by_cinema_date_filtered = _filter_cinemas_listings_by_dates(
         listings_by_cinema, dates
     )
-
     images_by_cinema = _get_cinemas_good_images(cinemas)
-
     listings_with_good_images = _match_and_attach_images_to_listings(
         listings_by_cinema_date_filtered, images_by_cinema, cinemas
     )
-
     redacted_listings_with_good_images = _redact_listings_fields(
         listings_with_good_images
     )
@@ -394,93 +304,64 @@ def get_image_listings(cinemas: list[str], dates: list[str]) -> dict:
 
 
 # ===== MAIN HANDLER =====
-
-
 def lambda_handler(event, context):
-
     print("Event:", json.dumps(event))
 
+    # --- Detect method across HTTP API v2 / REST API v1 / tests ---
     method = (
         event.get("httpMethod")
         or event.get("requestContext", {}).get("http", {}).get("method")
         or ""
     ).upper()
-    query = event.get("queryStringParameters") or {}
+
+    qs_single = event.get("queryStringParameters") or {}
+    qs_multi = event.get("multiValueQueryStringParameters") or {}
 
     if method == "OPTIONS":
         return build_response(200, {"message": "CORS preflight OK"})
 
-    # === GET ===
-    if method == "GET":
-        route_type = query.get("route_type")
-        if route_type not in ROUTE_TYPES:
-            return build_response(400, {"error": "Invalid route_type parameter"})
-
-        cinemas: list[str] = query.get("cinemas")
-        if (
-            not cinemas
-            or not isinstance(cinemas, list)
-            or any(c not in CINEMAS for c in cinemas)
-        ):
-            return build_response(
-                400, {"error": "Missing or invalid 'cinema' parameter"}
-            )
-
-        dates: list[str] = query.get("dates")
-
-        # === Dates are mandatory for all routes ===
-        if (
-            not dates
-            or not isinstance(dates, list)
-            or not all(
-                isinstance(d, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", d)
-                for d in dates
-            )
-        ):
-            return build_response(
-                500, {"error": "Missing or invalid 'dates' parameter"}
-            )
-
-        # === Listings ===
-        if route_type == "listings":
-            server_response_data = get_listings(cinemas, dates)
-
-        # === Visual Listings ===
-        elif route_type == "visual_listings":
-            server_response_data = get_image_listings(cinemas, dates)
-
-        return build_response(200, server_response_data)
-
-    else:
+    if method != "GET":
         return build_response(405, {"error": f"Unsupported method: {method}"})
+
+    route_type = (qs_single.get("route_type") or "").strip()
+    if route_type not in ROUTE_TYPES:
+        return build_response(400, {"error": "Invalid 'route_type' parameter"})
+
+    # Handle both repeated keys and CSV
+    raw_cinemas = qs_multi.get("cinemas", None)
+    if raw_cinemas is None:
+        raw_cinemas = qs_single.get("cinemas")
+    cinemas = _as_list(raw_cinemas)
+
+    raw_dates = qs_multi.get("dates", None)
+    if raw_dates is None:
+        raw_dates = qs_single.get("dates")
+    dates = _as_list(raw_dates)
+
+    # Validate params
+    if not cinemas or any(c not in CINEMAS for c in cinemas):
+        return build_response(400, {"error": "Missing or invalid 'cinemas' parameter"})
+
+    if not dates or not all(
+        isinstance(d, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", d) for d in dates
+    ):
+        return build_response(400, {"error": "Missing or invalid 'dates' parameter"})
+
+    # Route handling
+    if route_type == "listings":
+        server_response_data = get_listings(cinemas, dates)
+    else:
+        server_response_data = get_image_listings(cinemas, dates)
+
+    return build_response(200, server_response_data)
 
 
 # ===== LOCAL TESTING =====
 if __name__ == "__main__":
 
-    # Generate today and tomorrow as date objects
     today = date.today()
     tomorrow = today + timedelta(days=1)
-
-    # Generate lists of ISO-format date strings
-    next_week_dates = [(today + timedelta(days=i)).isoformat() for i in range(1, 8)]
     next_30_dates = [(today + timedelta(days=i)).isoformat() for i in range(1, 31)]
-
-    # Simple local test setup
-    test_event_visual_listings = {
-        "httpMethod": "GET",
-        "queryStringParameters": {
-            "route_type": "visual_listings",
-            "cinemas": [
-                "close_up",
-                "ica",
-                "nickel",
-                "prince_charles",
-                "bfi_southbank",
-            ],  # all available cinemas
-            "dates": next_30_dates,  # 30-day range
-        },
-    }
 
     test_event_listings = {
         "httpMethod": "GET",
@@ -492,17 +373,31 @@ if __name__ == "__main__":
                 "nickel",
                 "prince_charles",
                 "bfi_southbank",
-            ],  # all available cinemas
+            ],
             "dates": [
                 today.isoformat(),
                 tomorrow.isoformat(),
-            ],  # include today and tomorrow
+            ],
         },
     }
 
-    # Run the handler directly
-    response = lambda_handler(test_event_listings, context=None)
+    test_event_visual_listings = {
+        "httpMethod": "GET",
+        "queryStringParameters": {
+            "route_type": "visual_listings",
+            "cinemas": [
+                "bfi_southbank",
+                "prince_charles",
+                "rio",
+                "ica",
+            ],
+            "dates": [
+                today.isoformat(),
+                tomorrow.isoformat(),
+            ],
+        },
+    }
 
-    # Print formatted output
+    response = lambda_handler(test_event_listings, context=None)
     print("\n=== Local Test Result ===")
     print(json.dumps(response, indent=2))
