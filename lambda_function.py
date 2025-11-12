@@ -5,6 +5,11 @@ from datetime import date, timedelta
 from dotenv import load_dotenv
 from aws import set_s3_client, _generate_presigned_url
 from http_utils import build_response
+import logging
+
+# Basic logger setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # Load environment variables from .env (for local dev)
@@ -283,29 +288,39 @@ def _filter_cinemas_listings_by_dates(
 # ===== ROUTE HANDLERS =====
 def get_listings(cinemas: list[str], dates: list[str]) -> dict:
     listings_by_cinema = _get_cinemas_raw_listings(cinemas)
+    logger.info("Listings by cinema: %s", listings_by_cinema)
     filtered_by_dates = _filter_cinemas_listings_by_dates(listings_by_cinema, dates)
+    logger.info("Filtered listings by cinema: %s", filtered_by_dates)
     redacted_filtered = _redact_listings_fields(filtered_by_dates)
+    logger.info("Redacted filtered listings: %s", redacted_filtered)
     return redacted_filtered
 
 
 def get_image_listings(cinemas: list[str], dates: list[str]) -> dict:
     listings_by_cinema = _get_cinemas_raw_listings(cinemas)
+    logger.info("Listings by cinema: %s", listings_by_cinema)
     listings_by_cinema_date_filtered = _filter_cinemas_listings_by_dates(
         listings_by_cinema, dates
     )
+    logger.info("Filtered listings by cinema: %s", listings_by_cinema_date_filtered)
     images_by_cinema = _get_cinemas_good_images(cinemas)
+    logger.info("Images by cinema: %s", images_by_cinema)
     listings_with_good_images = _match_and_attach_images_to_listings(
         listings_by_cinema_date_filtered, images_by_cinema, cinemas
     )
+    logger.info("Listings with good images: %s", listings_with_good_images)
     redacted_listings_with_good_images = _redact_listings_fields(
         listings_with_good_images
+    )
+    logger.info(
+        "Redacted listings with good images: %s", redacted_listings_with_good_images
     )
     return redacted_listings_with_good_images
 
 
 # ===== MAIN HANDLER =====
 def lambda_handler(event, context):
-    print("Event:", json.dumps(event))
+    logger.info("Lambda triggered with event: %s", json.dumps(event))
 
     # --- Detect method across HTTP API v2 / REST API v1 / tests ---
     method = (
@@ -318,9 +333,11 @@ def lambda_handler(event, context):
     qs_multi = event.get("multiValueQueryStringParameters") or {}
 
     if method == "OPTIONS":
+        logger.info("OPTIONS request received")
         return build_response(200, {"message": "CORS preflight OK"})
 
     if method != "GET":
+        logger.warning("Unsupported HTTP method: %s", method)
         return build_response(405, {"error": f"Unsupported method: {method}"})
 
     route_type = (qs_single.get("route_type") or "").strip()
@@ -340,17 +357,21 @@ def lambda_handler(event, context):
 
     # Validate params
     if not cinemas or any(c not in CINEMAS for c in cinemas):
+        logger.warning("Invalid or missing cinemas param: %s", cinemas)
         return build_response(400, {"error": "Missing or invalid 'cinemas' parameter"})
 
     if not dates or not all(
         isinstance(d, str) and re.match(r"^\d{4}-\d{2}-\d{2}$", d) for d in dates
     ):
+        logger.warning("Invalid or missing dates param: %s", dates)
         return build_response(400, {"error": "Missing or invalid 'dates' parameter"})
 
     # Route handling
     if route_type == "listings":
+        logger.info("Processing standard listings for cinemas: %s", cinemas)
         server_response_data = get_listings(cinemas, dates)
     else:
+        logger.info("Processing visual listings for cinemas: %s", cinemas)
         server_response_data = get_image_listings(cinemas, dates)
 
     return build_response(200, server_response_data)
