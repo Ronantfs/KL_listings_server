@@ -22,6 +22,3 @@ Copy-Item modules build/
 
 # 7️⃣ Zip everything inside the build folder
 Compress-Archive -Path build\* -DestinationPath lambda_package.zip -Force
-
-# 8️⃣ Deactivate venv (optional, but clean)
-deactivate
