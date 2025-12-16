@@ -28,6 +28,7 @@ CINEMAS = [
     "regent_street",
     "rio",
     "the_cinema_museum",
+    "cine_lumiere",
 ]
 
 # types of data this server gets:
