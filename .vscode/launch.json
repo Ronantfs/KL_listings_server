@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Build Lambda",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "./buildDeploy/build_lambda.sh"
+        },
+        {
+            "name": "Deploy Lambda (skip build)",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "./buildDeploy/deploy.sh --skip-build"
+        },
+        {
+            "name": "Build + Deploy Lambda",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "./buildDeploy/deploy.sh"
+        }
+    ]
+}

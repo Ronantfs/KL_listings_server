@@ -1,0 +1,7 @@
+{
+    "aws_profile": "ronantfs",
+    "aws_region": "eu-north-1",
+    "lambda_function_name": "kl_listings_server",
+    "zip_path": "../lambda_package.zip",
+    "build_script": "./build_lambda.sh"
+}
