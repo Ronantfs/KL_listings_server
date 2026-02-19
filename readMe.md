@@ -1,31 +1,60 @@
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-python -m pip list
+# Service sumamry: 
+The server for the data that drives the front end of KL: 
 
-#for lambda build:
-# 2️⃣ Activate the virtual environment
-venv\Scripts\Activate.ps1
+Two "routes" (driven by query param): 
+- **listings**: 
+    - Desc: Raw cinema listings (film titles, showtimes, etc.) for the requested cinemas and dates, with internal fields redacted
+    - Drives: Cinema Listings Index
+    - Type of return (pre HTTP) #TODO
+- **visual_listings** —
+    - Desc:  Cinema listings filtered to only films that have a matching "good" image in S3, with a presigned image URL attached to each listing (also date-filtered and redacted)internal fields redacted
+    - Drives: VPE in front end
+    - Type of return (pre HTTP) #TODO
 
-# 3️⃣ Install required packages into the venv
-pip install -r requirements.txt
 
-# 4️⃣ Create a build directory
-New-Item -ItemType Directory -Force -Path build | Out-Null
+## Examples: 
 
-# 5️⃣ Install dependencies into the build folder (for Lambda package)
-pip install -r requirements.txt -t build/
+### Listings: 
 
-# 6️⃣ Copy your Lambda code into the build folder
-Copy-Item lambda_function.py build/
-Copy-Item modules build/
+Invoke payload: 
+``` json
+{
+    "httpMethod": "GET",
+    "queryStringParameters": {
+        "route_type": "listings",
+        "cinemas": "bfi_southbank,prince_charles",
+        "dates": "2026-02-19,2026-02-20"
+    }
+}
+```
 
-# 7️⃣ Zip everything inside the build folder
-Compress-Archive -Path build\* -DestinationPath lambda_package.zip -Force
+### Visual : 
+Invoke payload: 
+``` json
+{
+    "httpMethod": "GET",
+    "queryStringParameters": {
+        "route_type": "listings",
+        "cinemas": "bfi_southbank,prince_charles",
+        "dates": "2026-02-19,2026-02-20"
+    }
+}
+```
 
+
+
+
+
+
+
+
+
+
+---
+
+# INSTAL 
 
 MAC:
-
 --- local dev setup:
 uv venv .venv
 source .venv/bin/activate
@@ -66,3 +95,5 @@ chmod +x build_lambda_mac.sh
 
 then build with this:
 ./build_lambda_mac.sh
+
+---
