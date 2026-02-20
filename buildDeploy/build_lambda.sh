@@ -8,7 +8,8 @@ cd "$PROJECT_DIR"
 BUILD_DIR="build"
 ZIP_NAME="lambda_package.zip"
 REQUIREMENTS="requirements.txt"
-SOURCE_FILES=("lambda_function.py" "aws.py" "http_utils.py")
+SOURCE_FILES=("lambda_function.py")
+SOURCE_DIRS=("routes" "shared")
 
 echo "Working directory: $PROJECT_DIR"
 
@@ -38,6 +39,16 @@ for f in "${SOURCE_FILES[@]}"; do
   fi
   cp "$f" "$BUILD_DIR/"
   echo "  - $f copied"
+done
+
+echo "Copying Lambda source directories"
+for d in "${SOURCE_DIRS[@]}"; do
+  if [[ ! -d "$d" ]]; then
+    echo "ERROR: missing source directory $d"
+    exit 1
+  fi
+  cp -r "$d" "$BUILD_DIR/"
+  echo "  - $d/ copied"
 done
 
 echo "Creating Lambda deployment zip"

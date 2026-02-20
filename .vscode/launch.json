@@ -18,6 +18,93 @@
             "type": "node-terminal",
             "request": "launch",
             "command": "./buildDeploy/deploy.sh"
+        },
+        {
+            "name": "Test: listings",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/lambda_function.py",
+            "env": {
+                "ROUTE_TYPE": "listings",
+                "CINEMAS": "${input:cinemas}",
+                "DATES": "${input:dates}"
+            }
+        },
+        {
+            "name": "Test: visual_listings",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/lambda_function.py",
+            "env": {
+                "ROUTE_TYPE": "visual_listings",
+                "CINEMAS": "${input:cinemas}",
+                "DATES": "${input:dates}"
+            }
+        },
+        {
+            "name": "Test: pan_cinema_listings",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/lambda_function.py",
+            "env": {
+                "ROUTE_TYPE": "pan_cinema_listings"
+            }
+        },
+        {
+            "name": "Test: pan_cinema_listings (single film)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/lambda_function.py",
+            "env": {
+                "ROUTE_TYPE": "pan_cinema_listings",
+                "FILM_ID": "100"
+            }
+        },
+        {
+            "name": "Unit Tests: all",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["${workspaceFolder}/tests", "-v"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Unit Tests: current file",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["${file}", "-v"],
+            "cwd": "${workspaceFolder}"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "cinemas",
+            "type": "pickString",
+            "description": "Cinemas to test",
+            "options": [
+                { "label": "all", "value": "all" },
+                { "label": "barbican", "value": "barbican" },
+                { "label": "bfi_southbank", "value": "bfi_southbank" },
+                { "label": "castle", "value": "castle" },
+                { "label": "close_up", "value": "close_up" },
+                { "label": "garden_cinema", "value": "garden_cinema" },
+                { "label": "ica", "value": "ica" },
+                { "label": "nickel", "value": "nickel" },
+                { "label": "prince_charles", "value": "prince_charles" },
+                { "label": "regent_street", "value": "regent_street" },
+                { "label": "rio", "value": "rio" },
+                { "label": "the_cinema_museum", "value": "the_cinema_museum" },
+                { "label": "cine_lumiere", "value": "cine_lumiere" },
+                { "label": "arthouse_crouch_end", "value": "arthouse_crouch_end" }
+            ],
+            "default": "all"
+        },
+        {
+            "id": "dates",
+            "type": "promptString",
+            "description": "Dates to test — comma-separated ISO dates (YYYY-MM-DD,YYYY-MM-DD)",
+            "default": ""
         }
     ]
 }
